@@ -20,21 +20,23 @@ def mul(*args):
 
 
 class Model:
-    MUTATION_PROBABILITY = 0.006
-    RANDOM_FACTOR = 4
+    MUTATION_PROBABILITY = 0.03
+    RANDOM_FACTOR = 12
+    INPUT_LENGTH = 4
+    HIDDEN_LAYER_UNITS = 6
 
     def __init__(self, layer1=None, layer2=None, threshold=None):  # input: 横向到空隙中心的有向距离，纵向到中心的有向距离，到顶部的距离，屏幕大小
         # !!! 对传进来的数据一定要进行拷贝操作！！！
-        self.layer1 = ((np.random.random((10, 4)).astype('float16') - 0.5)
+        self.layer1 = ((np.random.random((self.HIDDEN_LAYER_UNITS, self.INPUT_LENGTH)).astype('float16') - 0.5)
                        * self.RANDOM_FACTOR) if layer1 is None \
             else np.array(layer1).astype('float16')  # type:np.ndarray
-        self.layer2 = ((np.random.random((1, 10)).astype('float16') - 0.5)
+        self.layer2 = ((np.random.random((1, self.HIDDEN_LAYER_UNITS)).astype('float16') - 0.5)
                        * self.RANDOM_FACTOR) if layer2 is None \
             else np.array(layer2).astype('float16')  # type:np.ndarray
         self.threshold = random.random() if threshold is None else threshold
 
     def calc(self, inputData):
-        inputData = np.array(inputData, dtype='float16').reshape((4, 1)) / SCREEN_SIZE
+        inputData = np.array(inputData, dtype='float16').reshape((self.INPUT_LENGTH, 1)) / SCREEN_SIZE
         return np.matmul(self.layer2, np.matmul(self.layer1, inputData)).flatten()[0]
 
     def cross(self, model):
@@ -55,14 +57,6 @@ class Model:
 
         threshold = random.choice((self.threshold, model.threshold))
         return Model(newLayer1, newLayer2, threshold).mutation()
-
-    # def cross(self, model):
-    #     """杂交2"""
-    #     selfRatio = random.random()
-    #     newLayer1 = self.layer1 * selfRatio + model.layer1 * (1 - selfRatio)
-    #     newLayer2 = self.layer2 * selfRatio + model.layer2 * (1 - selfRatio)
-    #     threshold = self.threshold * selfRatio + model.threshold * (1 - selfRatio)
-    #     return Model(newLayer1, newLayer2, threshold)
 
     def mutation(self):
         """突变"""
@@ -98,15 +92,24 @@ class ModelBird(Bird):
 
     def update(self, deltaTime, userJump: bool, wallGroup) -> None:
         super().update(deltaTime, userJump, wallGroup)
+        closestWall = None
+        distanceHorizontal = SCREEN_SIZE + 1  # 比较的初始值
+        x, y = self.rect.center
         for wall in wallGroup.objs:
             gapX, gapY = wall.getGapCenter()
-            x, y = self.rect.center
-            if self.model.calc((gapX - x, gapY - y, self.rect.top, SCREEN_SIZE)) > self.model.threshold:
-                self.jump()
+            if closestWall is None and 0 < gapX - x:
+                closestWall = wall
+                distanceHorizontal = gapX - x
+            elif 0 < gapX - x < distanceHorizontal:
+                closestWall = wall
+                distanceHorizontal = gapX - x
+        gapX, gapY = closestWall.getGapCenter()
+        if self.model.calc((gapX - x, gapY - y, self.rect.top, SCREEN_SIZE)) > self.model.threshold:
+            self.jump()
 
     def copy(self, mutation=False):
         """创建备份，注意：seq不会备份, mutation:是否产生突变"""
-        bird = ModelBird("copy")
+        bird = ModelBird("mutation" if mutation else "copy")
         bird.model = self.model.copy()
         if mutation:
             bird.model.mutation()
@@ -116,15 +119,15 @@ class ModelBird(Bird):
         return self.livingTime
 
     def __repr__(self):
-        return f"{{ModelBird_{self.seq}:{self.type}}}"
+        return f"{{ModelBird{self.seq:>10d}:{self.type:>10s}}}"
 
 
 class Population:
-    def __init__(self, size=1000, kingSize=10, randomSize=50):
+    def __init__(self, size, kingSize, kingMultiTimes, randomSize):
         self.birds = []
         self.size = size  # 种群个体数量
         self.kingSize = kingSize
-        self.kingMultipliesTimes = 20  # 迭代下一种群时kingBirds复制产生的倍数，剩下的是杂交bird和随机bird
+        self.kingMultipliesTimes = kingMultiTimes  # 迭代下一种群时kingBirds复制产生的倍数，剩下的是杂交bird和随机bird
         self.randomSize = randomSize  # 每一代中完全随机产生的bird的数量
         assert size >= self.kingSize * self.kingMultipliesTimes + self.randomSize, "不合理的参数导致种群个体数量不断增长"
 
@@ -140,10 +143,10 @@ class Population:
         copiedKingBirds = []
         for kb in kingBirds:
             kb.type = "king"
-            for i in range(19):
+            for i in range(self.kingMultipliesTimes - 1):
                 copiedKingBirds.append(kb.copy(mutation=True))
         randomBirds = [ModelBird("random") for i in range(self.randomSize)]
-        birds = self.cross(kingBirds, self.size - self.kingSize * 20 - self.randomSize)
+        birds = self.cross(kingBirds, self.size - self.kingSize * self.kingMultipliesTimes - self.randomSize)
         self.birds.clear()
         self.birds = kingBirds + copiedKingBirds + randomBirds + birds
 
@@ -174,20 +177,20 @@ class Statistic:
 
 
 def main():
-    population = Population(500, 10, 50)
+    population = Population(1000, 30, 20, 50)
     population.initPopulation()
     game = Game(16, 100000)
 
-    statis = Statistic(100)
+    statis = Statistic(10)
     while pygame.get_init():
-        random.seed(42)
+        # random.seed(43)
         game.main(population.birds)
-        random.seed(time.time())
+        # random.seed(time.time())
         minSeqBird = min(population.birds, key=lambda b: b.seq)
         maxFitBird = max(population.birds, key=lambda b: b.getFitness())
         statis.push(game.wallCount)
         print(
-            f"WallCnt:{game.wallCount}, Mean:{statis.mean():.2f}, MinSeq:{minSeqBird}, MaxFit:{maxFitBird}->{maxFitBird.getFitness()}, ThisTime:{Game.getTime()}")
+            f"WallCnt:{game.wallCount:5d}, Mean:{statis.mean():9.2f}, MinSeq:{minSeqBird}, MaxFit:{maxFitBird}->{maxFitBird.getFitness():>7d}, ThisTime:{Game.getTime():>7d}")
 
         population.nextPopulation()
 
