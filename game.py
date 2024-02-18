@@ -1,10 +1,13 @@
-from random import random, randint
-from typing import Any
+import math
+from random import randint
 
 import pygame
 from pygame import Surface
 
 SCREEN_SIZE = 500
+pygame.init()
+pygame.font.init()
+font = pygame.font.SysFont("Consolas", 25)
 
 
 class Group:
@@ -29,17 +32,18 @@ class Group:
 # noinspection PyAttributeOutsideInit
 class Bird:
     gravity = 1600  # 重力加速度 px / s / s
-
     # gravity = 0
+    image = Surface((50, 50))
+    image.fill("red")
+    pygame.draw.rect(image, (0, 255, 0), image.get_rect(top=0, left=0), width=3)
 
-    def __init__(self, group=None):
+    def __init__(self, group=None, seq=-1):
+        self.seq = seq
         self.addGroup(group)
-        self.image = Surface((50, 50))
-        self.image.fill("red")
         self.rect = self.image.get_rect(top=0, left=100)
         self.v_Y = 0  # 纵向速度
 
-        self.livingTime = 0
+        self.livingTime = -1
 
     def addGroup(self, group):
         if group:
@@ -52,7 +56,6 @@ class Bird:
 
     def update(self, deltaTime, userJump: bool, wallGroup) -> None:
         deltaTime = deltaTime / 1000
-        self.livingTime += deltaTime
         self.v_Y += self.gravity * deltaTime
         if userJump:
             self.jump()
@@ -63,6 +66,9 @@ class Bird:
             for rect in wall.rectTop, wall.rectBottom:
                 if self.rect.colliderect(rect):
                     self.kill()
+        if self.alive():
+            # self.livingTime = Game.getTime()
+            self.livingTime = max(self.livingTime, Game.getTime())  # 保留该鸟曾经最高的分数
 
     def alive(self):
         return bool(self.group)
@@ -72,6 +78,10 @@ class Bird:
 
     def draw(self, screen: Surface):
         screen.blit(self.image, self.rect)
+        text = font.render(f"{self.seq}", False, (255, 255, 0))
+        rect = text.get_rect()
+        rect.center = self.rect.center
+        screen.blit(text, rect)
 
     def jump(self):
         self.v_Y = -600
@@ -79,7 +89,7 @@ class Bird:
 
 # noinspection PyAttributeOutsideInit
 class Wall:
-    def __init__(self, group, gap: int, width=70, gapSize=130, velo=250):
+    def __init__(self, group, gap: int, width=70, gapSize=140, velo=250):
         """
         :param group: Group
         :param gap: 空隙中心点y值
@@ -124,34 +134,38 @@ class Wall:
 
 
 class Game:
+    time = 0
+
     def __init__(self, fixedDeltaTime=None, fps=60):
         """
-        :param fixedDeltaTime: 是否固定提供一个假的deltaTime以便游戏加速；None为不固定，使用真实值；为整数则为要提供的固定值
+        :param fixedDeltaTime: 是否固定提供一个假的deltaTime以便游戏加速，加速的游戏可能精度下降；None为不固定，使用真实值；为整数则为要提供的固定值
         :param fps: 设置游戏帧率
         """
         self.running = True
         self.fps = fps
         self.fixedDeltaTime = fixedDeltaTime
-        pygame.init()
         self.screen = pygame.display.set_mode((SCREEN_SIZE, SCREEN_SIZE))
         self.wallGroup = Group()
         self.birdGroup = Group()
         self.clock = pygame.time.Clock()
-        pygame.font.init()
-        self.font = pygame.font.SysFont("Consolas", 25)
 
         self.wallIntervalTime = 1900
         self.distanceToLastPlacement = self.wallIntervalTime + 1
         self.wallCount = 0
 
+    @classmethod
+    def getTime(cls):
+        return cls.time
+
     def placeWall(self, deltaTime):
         self.distanceToLastPlacement += deltaTime
         if self.distanceToLastPlacement > self.wallIntervalTime:
-            Wall(self.wallGroup, randint(75, SCREEN_SIZE - 75))
+            Wall(self.wallGroup, randint(70, SCREEN_SIZE - 70))
             self.wallCount += 1
             self.distanceToLastPlacement = 0
 
     def main(self, birds):
+        Game.time = 0
         self.wallCount = 0
         self.distanceToLastPlacement = self.wallIntervalTime + 1
         self.birdGroup.objs.clear()
@@ -159,6 +173,7 @@ class Game:
 
         for bird in birds:
             bird.addGroup(self.birdGroup)
+            bird.rect.top = SCREEN_SIZE // 2
         while self.running:
             jump = False
 
@@ -178,6 +193,8 @@ class Game:
             else:
                 deltaTime = self.fixedDeltaTime
 
+            Game.time += deltaTime
+
             self.placeWall(deltaTime)
 
             self.birdGroup.update(deltaTime, jump, self.wallGroup)
@@ -186,7 +203,8 @@ class Game:
             self.wallGroup.update(deltaTime)
             self.wallGroup.draw(self.screen)
 
-            text = self.font.render(f"PassedWalls:{self.wallCount}, LeftBirds:{len(self.birdGroup.objs)}", False, (255, 255, 255))
+            text = font.render(f"PassedWalls:{self.wallCount}, LeftBirds:{len(self.birdGroup.objs)}", False,
+                               (255, 255, 255))
             self.screen.blit(text, text.get_rect(top=10, left=10))
 
             if len(self.birdGroup.objs) == 0:
@@ -201,4 +219,4 @@ class Game:
 
 
 if __name__ == '__main__':
-    Game().main([Bird()]) # 你自己玩
+    Game().main([Bird()])  # 你自己玩
